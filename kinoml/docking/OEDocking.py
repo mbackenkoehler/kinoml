@@ -67,6 +67,7 @@ def pose_molecules(
     molecules: List[oechem.OEMolBase],
     pKa_norm: bool = True,
     score_pose: bool = False,
+    all_poses: bool = False,
 ) -> Union[List[oechem.OEGraphMol], None]:
     """
     Generate a binding pose of molecules in a prepared receptor with OpenEye's Posit method.
@@ -81,6 +82,8 @@ def pose_molecules(
         Assign the predominant ionization state at pH ~7.4.
     score_pose: bool, default=False
         Score the best docking pose per ligand and add the proper SD tag.
+    all_poses: bool, default=False
+        Return all poses.
 
     Returns
     -------
@@ -135,16 +138,19 @@ def pose_molecules(
         # sort poses of all tautomers and enantiomers by score
         posed_conformations.sort(key=probability, reverse=True)
 
+        print(len(posed_conformations), 'conformations')
         # keep conformation with highest probability
         if len(posed_conformations) > 0:
-            best_pose = posed_conformations[0]
-            if score_pose:
-                # calculate and store ChemGauss4 docking score
-                pose_scorer = oedocking.OEScore(oedocking.OEScoreType_Chemgauss4)
-                pose_scorer.Initialize(design_unit)
-                pose_scorer.ScoreLigand(best_pose)
-                oedocking.OESetSDScore(best_pose, pose_scorer, pose_scorer.GetName())
-            posed_molecules.append(best_pose)
+            if not all_poses:
+                posed_conformations = posed_conformations[:1]
+            for pose in posed_conformations:
+                if score_pose:
+                    # calculate and store ChemGauss4 docking score
+                    pose_scorer = oedocking.OEScore(oedocking.OEScoreType_Chemgauss4)
+                    pose_scorer.Initialize(design_unit)
+                    pose_scorer.ScoreLigand(pose)
+                    oedocking.OESetSDScore(pose, pose_scorer, pose_scorer.GetName())
+                posed_molecules.append(pose)
 
     if len(posed_molecules) == 0:
         # TODO: returning None when something goes wrong

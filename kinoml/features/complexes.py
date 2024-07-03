@@ -1280,11 +1280,12 @@ class OEComplexFeaturizer(OEBaseModelingFeaturizer, SingleLigandProteinComplexFe
                         f"altloc{system.protein.alternate_location}"
                         if hasattr(system.protein, "alternate_location")
                         else None,
+                        f"pose{i}",
                     ]
                     if info
                 ]
             ),
-            system.ligand.name,
+            system.ligand.name + f"pose{i}",
         )
 
         logger.debug("Generating new MDAnalysis universe ...")
@@ -1371,12 +1372,14 @@ class OEDockingFeaturizer(OEBaseModelingFeaturizer, SingleLigandProteinComplexFe
         Assign the predominant ionization state of the molecules to dock at pH
         ~7.4. If False, the ionization state of the input molecules will be
         conserved.
+    all_poses: bool, default=False
+        Return all poses. If False, only the top pose is returned.
     """
 
     from MDAnalysis.core.universe import Universe
     from openeye import oechem
 
-    def __init__(self, method: str = "Posit", pKa_norm: bool = True, **kwargs):
+    def __init__(self, method: str = "Posit", pKa_norm: bool = True, all_poses: bool = False, **kwargs):
         super().__init__(**kwargs)
         if method not in ["Fred", "Hybrid", "Posit"]:
             raise ValueError(
@@ -1385,6 +1388,7 @@ class OEDockingFeaturizer(OEBaseModelingFeaturizer, SingleLigandProteinComplexFe
             )
         self.method = method
         self.pKa_norm = pKa_norm
+        self.all_poses = all_poses
 
     _SUPPORTED_TYPES = (ProteinLigandComplex,)
 
@@ -1496,60 +1500,70 @@ class OEDockingFeaturizer(OEBaseModelingFeaturizer, SingleLigandProteinComplexFe
                 [system.ligand.molecule.to_openeye()],
                 pKa_norm=self.pKa_norm,
                 score_pose=True,
+                all_poses=self.all_poses,
             )
         if not docking_poses:
             logger.debug("No docking pose found, returning None!")
             return None
-        else:
-            docking_pose = docking_poses[0]
-        # generate residue information
-        oechem.OEPerceiveResidues(docking_pose, oechem.OEPreserveResInfo_None)
+        elif not self.all_poses:
+            docking_poses = docking_poses[:1]
 
-        logger.debug("Assembling components ...")
-        protein_ligand_complex = self._assemble_components(protein, solvent, docking_pose)
+        structures = []
+        print("#docking poses:", len(docking_poses))
+        for i, docking_pose in enumerate(docking_poses):
+            # generate residue information
+            oechem.OEPerceiveResidues(docking_pose, oechem.OEPreserveResInfo_None)
 
-        logger.debug("Updating pdb header ...")
-        protein_ligand_complex = self._update_pdb_header(
-            protein_ligand_complex,
-            protein_name=system.protein.name,
-            ligand_name=system.ligand.name,
-        )
+            logger.debug("Assembling components ...")
+            protein_ligand_complex = self._assemble_components(protein, solvent, docking_pose)
 
-        logger.debug("Writing results ...")
-        file_path = self._write_results(
-            protein_ligand_complex,
-            "_".join(
-                [
-                    info
-                    for info in [
-                        system.protein.name,
-                        system.protein.pdb_id
-                        if system.protein.pdb_id
-                        else Path(system.protein.metadata["file_path"]).stem,
-                        f"chain{system.protein.chain_id}"
-                        if hasattr(system.protein, "chain_id")
-                        else None,
-                        f"altloc{system.protein.alternate_location}"
-                        if hasattr(system.protein, "alternate_location")
-                        else None,
+            logger.debug("Updating pdb header ...")
+            protein_ligand_complex = self._update_pdb_header(
+                protein_ligand_complex,
+                protein_name=system.protein.name,
+                ligand_name=system.ligand.name,
+            )
+
+            logger.debug("Writing results ...")
+            file_path = self._write_results(
+                protein_ligand_complex,
+                "_".join(
+                    [
+                        info
+                        for info in [
+                            system.protein.name,
+                            system.protein.pdb_id
+                            if system.protein.pdb_id
+                            else Path(system.protein.metadata["file_path"]).stem,
+                            f"chain{system.protein.chain_id}"
+                            if hasattr(system.protein, "chain_id")
+                            else None,
+                            f"altloc{system.protein.alternate_location}"
+                            if hasattr(system.protein, "alternate_location")
+                            else None,
+                            f"pose{i}"
+                        ]
+                        if info
                     ]
-                    if info
-                ]
-            ),
-            system.ligand.name,
-        )
+                ),
+                system.ligand.name,
+            )
 
-        logger.debug("Generating new MDAnalysis universe ...")
-        structure = read_molecule(file_path)
+            logger.debug("Generating new MDAnalysis universe ...")
+            structure = read_molecule(file_path)
 
-        if not self.output_dir:
-            logger.debug("Removing structure file ...")
-            file_path.unlink()
+            if not self.output_dir:
+                logger.debug("Removing structure file ...")
+                file_path.unlink()
 
-        logger.debug("Storing docking score in MDAnalysis universe._topology ...")
-        self._store_docking_score(structure, docking_pose)
+            logger.debug("Storing docking score in MDAnalysis universe._topology ...")
+            self._store_docking_score(structure, docking_pose)
 
-        return structure
+            structures.append(structure)
+
+        if not self.all_poses:
+            return structures[0]
+        return structures
 
     @staticmethod
     def _store_docking_score(structure: Universe, docking_pose: oechem.OEGraphMol):
