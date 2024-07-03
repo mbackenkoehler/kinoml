@@ -245,7 +245,7 @@ class ParallelBaseFeaturizer(BaseFeaturizer):
         dask_client=None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__()
         self.use_multiprocessing = use_multiprocessing
         self.n_processes = n_processes
         self.chunksize = chunksize
