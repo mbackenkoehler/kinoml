@@ -28,6 +28,9 @@ class BaseFeaturizer:
 
     _SUPPORTED_TYPES = (System,)
 
+    def __init__(self):
+        pass
+
     def featurize(
         self,
         systems: List[System],
